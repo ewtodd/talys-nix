@@ -1,3 +1,24 @@
-result/* 
-*result 
+# Nix build output
+result/*
+*result
+
+# Main output
 *.out
+# Cross sections and residual production
+*.tot
+# Optical-model potential (ecis.pot)
+*.pot
+# RECENT / SIGMA1 lists
+*.LST
+# Residual-production files (rp*.tot, rp*.L00, rp*.L01)
+rp*
+# Residual point files
+*.respoint*
+# TENDL export files
+*.res.tendl.*
+# Energy grid
+energies
+
+# TALYS input files
+*.in
+*.inp
