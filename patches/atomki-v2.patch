@@ -1,0 +1,237 @@
+diff -ruN ../orig/talys/source/checkvalue.f90 talys/source/checkvalue.f90
+--- a/source/checkvalue.f90
++++ b/source/checkvalue.f90
+@@ -664,7 +664,7 @@
+       call range_real_error('grescue', grescue(mt, is), 0.001, 1000., index1 = mt, name1 = 'MT', index2 = is, name2 = 'iso')
+     enddo
+   enddo
+-  call range_integer_error('alphaomp', alphaomp, 1, 8)
++  call range_integer_error('alphaomp', alphaomp, 1, 9)
+   call range_integer_error('deuteronomp', deuteronomp, 1, 5)
+   call range_integer_error('radialmodel', radialmodel, 1, 2)
+ !
+diff -ruN ../orig/talys/source/finalout.f90 talys/source/finalout.f90
+--- a/source/finalout.f90
++++ b/source/finalout.f90
+@@ -278,7 +278,7 @@
+     endif
+     write(51, '("deuteronomp    ", i1)') deuteronomp
+     write(51, '("alphaomp       ", i1)') alphaomp
+-    if (alphaomp >= 3 .and. alphaomp <= 5) then
++    if ((alphaomp >= 3 .and. alphaomp <= 5) .or. alphaomp == 9) then
+       write(51, '("aradialcor     ", f10.5)') aradialcor
+       write(51, '("adepthcor      ", f10.5)') adepthcor
+     endif
+diff -ruN ../orig/talys/source/foldalpha.f90 talys/source/foldalpha.f90
+--- a/source/foldalpha.f90
++++ b/source/foldalpha.f90
+@@ -1,11 +1,14 @@
+ subroutine foldalpha(Zix, Nix, E)
+ !
+ !-----------------------------------------------------------------------------------------------------------------------------------
+-! Purpose   : Purpose of this module
++! Purpose   : Real double folding + imaginary Woods-Saxon alpha optical potential
+ !
+ ! Author    : Arjan Koning
+ !
+ ! 2021-12-30: Original code
++! 2021-03-19: alphaomp=9, Atomki-V2 potential (P. Mohr), ported from the TALYS-1.8
++!             supplementary material of P. Mohr, Zs. Fulop, Gy. Gyurky, G.G. Kiss, T. Szucs,
++!             At. Data Nucl. Data Tables 142, 101453 (2021)
+ !-----------------------------------------------------------------------------------------------------------------------------------
+ !
+ ! *** Use data from other modules
+@@ -84,6 +87,7 @@
+   real(sgl)         :: radmom(numjlm)    ! radial grid for the potential, identical as the one used for JLM
+   real(sgl)         :: raw               ! radius
+   real(sgl)         :: rb                ! maximum radius value
++  real(sgl)         :: rc_pm             ! Coulomb radius read from the Atomki-V2 potential file
+   real(sgl)         :: rhomom(numjlm)    ! total density (neutron + proton) at a given radius radmom
+   real(sgl)         :: rr                ! running variable in integration over the radius
+   real(sgl)         :: rva(1000)         ! radial coordinate for the double folding potential
+@@ -102,6 +106,7 @@
+   real(sgl)         :: www               ! depth of imaginary volume potential
+   real(sgl)         :: z                 ! charge number
+   integer           :: i                 ! level
++  integer           :: istat             ! logical for file access
+   integer           :: k                 ! designator for particle
+   integer           :: khi               ! help variable
+   integer           :: kk                ! counter
+@@ -132,6 +137,7 @@
+ !--------------------------------------------------------------------------------------
+ !
+   v5d = 0.
++  if (alphaomp == 9) goto 40
+   goto (10, 20, 30, 200) alphaomp - 2
+    10 continue
+ !--------------------------------------------------------------------------------------
+@@ -220,6 +226,24 @@
+   alphav(4) = aaw
+   alphav(8) = ww
+ !
++  goto 50
++!
++   40 continue
++!--------------------------------------------------------------------------------------
++! Case alphaomp=9
++! Atomki-V2 potential of P. Mohr et al., At. Data Nucl. Data Tables 142, 101453 (2021)
++! The real part is read from the file alphaomp9real.gnu in the working directory
++! (see below). Imaginary potential: Woods-Saxon volume term with W0 = 50 MeV,
++! R0 = 1.0 fm, a = 0.1 fm (simulation of CCFULL), no surface term.
++!--------------------------------------------------------------------------------------
++  alphav(1) = 1.25
++  alphav(3) = 1.0
++  alphav(4) = 0.1
++  alphav(8) = 50.0
++  alphav(5) = 0.
++  dwv = 0.
++  dws = 0.
++!
+    50 continue
+ 
+ ! final radius, diffuseness and depth of the imaginary WS-type potential
+@@ -252,7 +276,49 @@
+   nu = 1000
+   nradrho = numjlm
+ 
+-  call afold(z, a, ee, rb, nu, rva, va, radmom, rhomom, nradrho)
++  if (alphaomp == 9) then
++!
++! Atomki-V2: read the tabulated real folding potential from alphaomp9real.gnu.
++! File format (from the supplementary material of the ADNDT paper):
++!   2 header lines, 1 line with the Coulomb radius rc, then per line
++!   r [fm], V(r) [MeV] (further columns are ignored).
++!
++    open(unit = 77, file = 'alphaomp9real.gnu', status = 'old', iostat = istat)
++    if (istat /= 0) then
++      write(*, '(" TALYS-error: alphaomp 9 requires the Atomki-V2 real potential file alphaomp9real.gnu", &
++ &      " in the working directory")')
++      stop
++    endif
++    read(77, '(a)', iostat = istat) key
++    if (istat == 0) read(77, '(a)', iostat = istat) key
++    if (istat == 0) read(77, *, iostat = istat) rc_pm
++    if (istat /= 0) then
++      write(*, '(" TALYS-error: cannot read the header of alphaomp9real.gnu")')
++      stop
++    endif
++    if (rc_pm <= 0.5 .or. rc_pm >= 2.0) then
++      write(*, '(" TALYS-error: Coulomb radius in alphaomp9real.gnu out of range 0.5...2.0 fm: ", f10.5)') rc_pm
++      stop
++    endif
++    nu = 0
++    do i = 1, 1000
++      read(77, *, iostat = istat) rva(i), va(i)
++      if (istat /= 0) exit
++      nu = i
++    enddo
++    close(77)
++    if (nu < 2) then
++      write(*, '(" TALYS-error: no potential values found in alphaomp9real.gnu")')
++      stop
++    endif
++    if (rva(nu) < rb) then
++      write(*, '(" TALYS-error: alphaomp9real.gnu ends at r = ", f8.3, " fm, radial grid extends to ", f8.3, " fm")') &
++ &      rva(nu), rb
++      stop
++    endif
++  else
++    call afold(z, a, ee, rb, nu, rva, va, radmom, rhomom, nradrho)
++  endif
+ !
+ ! Depth and shape are multiplied by the OMP adjustment keywords of TALYS
+ ! (default 1.)
+@@ -275,7 +341,15 @@
+ !   of the (a,g) and (a,n) data of deformed nuclei : 27/4/2018 (Brussels)
+ !   increase of rva by 3% for deformed nuclei but only below typically 18 MeV
+ 
+-    rva(i) = factor1 * aradialcor * rva(i) * (1. + abs(beta2(Zix, Nix, 0)) / 15. / (1. + exp((E - 18.) / 2.)))
++!
++! Atomki-V2: the real part is a fixed tabulated potential, so only the
++! aradialcor/adepthcor keywords apply; the deformation correction below is not.
++!
++    if (alphaomp == 9) then
++      rva(i) = factor1 * aradialcor * rva(i)
++    else
++      rva(i) = factor1 * aradialcor * rva(i) * (1. + abs(beta2(Zix, Nix, 0)) / 15. / (1. + exp((E - 18.) / 2.)))
++    endif
+     va(i) = factor2 * adepthcor * va(i)
+   enddo
+ !
+@@ -307,7 +381,7 @@
+     bb1 = (rr - rva(klo)) / hh
+     vopr(k) = aa1 * va(klo) + bb1 * va(khi)
+ ! dispersive contributions to real potential for alphaomp=5  (OMP III)
+-    if (alphaomp < 5) then
++    if (alphaomp /= 5) then
+       vdiv = 0.
+       vdis = 0.
+     else
+@@ -345,6 +419,8 @@
+   enddo
+ ! calculate the coulomb radius based on elton's formula
+   rc = 1.123 + 2.352 * (a **( - .666666)) - 2.07 * (a **( - 1.333333))
++! Atomki-V2: Coulomb radius from the potential file
++  if (alphaomp == 9) rc = rc_pm
+   200 continue
+   return
+ end subroutine foldalpha
+diff -ruN ../orig/talys/source/inputout.f90 talys/source/inputout.f90
+--- a/source/inputout.f90
++++ b/source/inputout.f90
+@@ -455,7 +455,7 @@
+   write(*, '(" radialmodel        ", i2, "     radialmodel  model for radial matter densities (JLM OMP only)")') radialmodel
+   write(*, '(" jlmmode            ", i2, "     jlmmode      option for JLM imaginary potential normalization")') jlmmode
+   write(*, '(" alphaomp           ", i2, "     alphaomp     alpha OMP (1=normal, 2= McFadden-Satchler,", &
+- &  " 3-5= folding pot., 6,8= Avrigeanu, 7=Nolte)")') alphaomp
++ &  " 3-5= folding pot., 6,8= Avrigeanu, 7=Nolte, 9=Atomki-V2)")') alphaomp
+   write(*, '(" deuteronomp        ", i2, "     deuteronomp  deuteron OMP (1=normal, 2=Daehnick,", &
+  &  " 3=Bojowald, 4=Han-Shi-Shen, 5=An-Cai)")') deuteronomp
+   write(*, '(" ecisstep        ", es9.2, " ecisstep     integration step size for ECIS OMP calculation")') ecisstep
+diff -ruN ../orig/talys/source/opticalalpha.f90 talys/source/opticalalpha.f90
+--- a/source/opticalalpha.f90
++++ b/source/opticalalpha.f90
+@@ -79,6 +79,7 @@
+ !
+ ! S. Goriely: inclusion of the alpha OMP of Mc Fadden & Satchler for alphaomp=2, folding model for alphaomp=3,4,5
+ ! alphaomp=6 --> Avrigeanu et al. potential [PRC90,044612(2014)]
++! alphaomp=9 --> Atomki-V2 potential of Mohr et al. [ADNDT 142, 101453 (2021)], handled in foldalpha
+ !
+ ! Overwrite some of the previous values.
+ !
+diff -ruN ../orig/talys/source/opticalcomp.f90 talys/source/opticalcomp.f90
+--- a/source/opticalcomp.f90
++++ b/source/opticalcomp.f90
+@@ -320,7 +320,7 @@
+       call opticaldeut(Zix, Nix, eopt)
+       i = deuteronomp
+     endif
+-    if (k == 6 .and. (alphaomp == 2 .or. alphaomp >= 6)) then
++    if (k == 6 .and. (alphaomp == 2 .or. (alphaomp >= 6 .and. alphaomp <= 8))) then
+       call opticalalpha(Zix, Nix, eopt)
+       i = alphaomp
+     endif
+diff -ruN ../orig/talys/source/radialtable.f90 talys/source/radialtable.f90
+--- a/source/radialtable.f90
++++ b/source/radialtable.f90
+@@ -133,7 +133,7 @@
+     jlmexist(Zix, Nix, 1) = .true.
+     jlmexist(Zix, Nix, 2) = .true.
+   endif
+-  if (alphaomp >= 3 .and. alphaomp <= 5) jlmexist(Zix, Nix, 6) = .true.
++  if ((alphaomp >= 3 .and. alphaomp <= 5) .or. alphaomp == 9) jlmexist(Zix, Nix, 6) = .true.
+   return
+ end subroutine radialtable
+ ! Copyright A.J. Koning 2021
+diff -ruN ../orig/talys/source/structure.f90 talys/source/structure.f90
+--- a/source/structure.f90
++++ b/source/structure.f90
+@@ -83,7 +83,7 @@
+     call gammapar(Zix, Nix)
+   endif
+   if ((Zix <= 2 .and. Nix <= 2) .or. flagompall) call omppar(Zix, Nix)
+-  if (flagjlm .or. alphaomp >= 3 .and. alphaomp <= 5) call radialtable(Zix, Nix)
++  if (flagjlm .or. (alphaomp >= 3 .and. alphaomp <= 5) .or. alphaomp == 9) call radialtable(Zix, Nix)
+   if (flagomponly .and. .not. flagcomp) return
+   if (flagfission) call fissionpar(Zix, Nix)
+   call densitypar(Zix, Nix)

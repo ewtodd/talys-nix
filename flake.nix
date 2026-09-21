@@ -39,10 +39,39 @@
             '';
           };
 
+          # Real part of the Atomki-V2 alpha-nucleus potential (alphaomp 9),
+          # tabulated for Z = 26-83, from the supplementary material of
+          #   P. Mohr, Zs. Fülöp, Gy. Gyürky, G.G. Kiss, T. Szücs,
+          #   At. Data Nucl. Data Tables 142, 101453 (2021).
+          # One file per target, share/talys/atomki-v2/zZZZaAAAa_talys_alphaomp9real.gnu.
+          talys-atomki-v2-potentials = pkgs.stdenv.mkDerivation {
+            pname = "talys-atomki-v2-potentials";
+            version = "2021";
+            src = pkgs.fetchurl {
+              url = "https://ars.els-cdn.com/content/image/1-s2.0-S0092640X2100036X-mmc1.zip";
+              hash = "sha256-OeD1565wmXuBPBOShcEz0eEo868l8GTlrYINwVPZ2jI=";
+            };
+            nativeBuildInputs = [ pkgs.unzip ];
+            dontUnpack = true;
+            dontFixup = true;
+            installPhase = ''
+              mkdir -p "$out/share/talys/atomki-v2"
+              unzip -p "$src" Atomki-V2_potentials.tgz \
+                | tar -xz -C "$out/share/talys/atomki-v2"
+              chmod 644 "$out"/share/talys/atomki-v2/*.gnu
+            '';
+          };
+
           talys = pkgs.stdenv.mkDerivation {
             pname = "talys";
             inherit version src;
             nativeBuildInputs = [ pkgs.gfortran ];
+
+            # Adds "alphaomp 9": the Atomki-V2 alpha OMP of Mohr et al. (2021),
+            # ported from the TALYS-1.8 sources in the paper's supplementary
+            # material.  The real potential is read from alphaomp9real.gnu in
+            # the working directory (see talys-atomki-v2-potentials).
+            patches = [ ./patches/atomki-v2.patch ];
 
             postPatch = ''
               # Do what path_change.bash does, but with the store path.
@@ -67,6 +96,7 @@
         in
         {
           default = talys;
+          inherit talys talys-structure talys-atomki-v2-potentials;
         }
       );
 
@@ -98,23 +128,46 @@
         };
       });
 
-      # One short TALYS run, to check that the executable finds and reads the
+      # Short TALYS runs, to check that the executable finds and reads the
       # structure database.  The sample suite (make -C source check) takes
       # about an hour and is far too long for a flake check.
-      checks = forAllSystems (pkgs: {
-        smoke = pkgs.runCommand "talys-smoke-test" { } ''
-          printf '%s\n' "projectile n" "element fe" "mass 56" "energy 14." \
-            "filetotal y" > talys.inp
+      checks = forAllSystems (
+        pkgs:
+        let
+          talys = nixpkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.talys;
+          potentials = self.packages.${pkgs.stdenv.hostPlatform.system}.talys-atomki-v2-potentials;
+        in
+        {
+          smoke = pkgs.runCommand "talys-smoke-test" { } ''
+            printf '%s\n' "projectile n" "element fe" "mass 56" "energy 14." \
+              "filetotal y" > talys.inp
 
-          ${nixpkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.talys} \
-            < talys.inp > talys.out
+            ${talys} < talys.inp > talys.out
 
-          grep -q "congratulates you with this successful calculation" talys.out
-          test -s total.tot
+            grep -q "congratulates you with this successful calculation" talys.out
+            test -s total.tot
 
-          mkdir -p "$out"
-          cp talys.inp talys.out total.tot "$out/"
-        '';
-      });
+            mkdir -p "$out"
+            cp talys.inp talys.out total.tot "$out/"
+          '';
+
+          # alpha + Ni-58 with the Atomki-V2 potential (alphaomp 9).
+          atomki-v2 = pkgs.runCommand "talys-atomki-v2-test" { } ''
+            printf '%s\n' "projectile a" "element ni" "mass 58" "energy 10." \
+              "alphaomp 9" "filetotal y" > talys.inp
+            ln -s ${potentials}/share/talys/atomki-v2/z028a058a_talys_alphaomp9real.gnu \
+              alphaomp9real.gnu
+
+            ${talys} < talys.inp > talys.out
+
+            grep -q "congratulates you with this successful calculation" talys.out
+            grep -q "alphaomp            9" talys.out
+            test -s total.tot
+
+            mkdir -p "$out"
+            cp talys.inp talys.out total.tot "$out/"
+          '';
+        }
+      );
     };
 }
