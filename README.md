@@ -101,6 +101,12 @@ energy 10.
 alphaomp 9
 ```
 
+The imaginary potential has a diffuseness of only 0.1 fm, which the default
+ECIS integration step does not resolve: the reaction cross section then
+wobbles by up to ~10% from one energy to the next. With `alphaomp 9` the
+patch therefore sets `ecisstep 0.02` (converged; 0.05, 0.02 and 0.01 agree to
+four digits) unless the input file gives `ecisstep` itself.
+
 `aradialcor` and `adepthcor` scale the tabulated real potential as they do
 for `alphaomp 3-5`. The TALYS-2.2 deformation correction to the radius of the
 folding potential is not applied to the Atomki-V2 table (it did not exist in

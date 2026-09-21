@@ -176,6 +176,21 @@ diff -ruN ../orig/talys/source/foldalpha.f90 talys/source/foldalpha.f90
    200 continue
    return
  end subroutine foldalpha
+diff -ruN ../orig/talys/source/input_omppar.f90 talys/source/input_omppar.f90
+--- a/source/input_omppar.f90
++++ b/source/input_omppar.f90
+@@ -176,6 +176,11 @@
+     ecisstep = 0.
+     flagspher = .false.
+   endif
++!
++! Atomki-V2: the 0.1 fm diffuseness of the imaginary potential needs a finer
++! ECIS integration step than the default; converged at 0.02 fm.
++!
++  if (alphaomp == 9) ecisstep = 0.02
+   if (k0 > 2) flagspher = .true.
+   riplomp = 0
+   flagriplomp= .false.
 diff -ruN ../orig/talys/source/inputout.f90 talys/source/inputout.f90
 --- a/source/inputout.f90
 +++ b/source/inputout.f90
