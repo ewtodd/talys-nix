@@ -23,10 +23,29 @@
       packages = forAllSystems (
         pkgs:
         let
-          src = pkgs.fetchurl {
-            url = "https://nds.iaea.org/talys/codes/talys.tar";
-            hash = "sha256-pB6TWkVkmnmyxLT2GNdx5LVPEnXfnY/hCVNo0dBG0LQ=";
-          };
+          # nds.iaea.org sits behind a Cloudflare managed challenge that
+          # answers fetchurl's plain GET with HTTP 403.  What currently gets
+          # through is a browser User-Agent, an Accept-Language header, and a
+          # curl-level range request.  The range matters: `-r` places the
+          # Range header before User-Agent, while `-H Range` appends it after
+          # Accept-Language, and Cloudflare appears to score that ordering.
+          # fetchurl hardcodes `--continue-at`, which curl refuses together
+          # with `--range`, so fetch in a fixed-output derivation of our own.
+          # The hash is unchanged, so the store path stays the same.
+          src = pkgs.runCommand "talys.tar" {
+            outputHash = "sha256-pB6TWkVkmnmyxLT2GNdx5LVPEnXfnY/hCVNo0dBG0LQ=";
+            outputHashMode = "flat";
+            nativeBuildInputs = [ pkgs.curl ];
+            SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+            impureEnvVars = pkgs.lib.fetchers.proxyImpureEnvVars;
+          } ''
+            curl --location --fail --retry 3 --retry-all-errors \
+              --user-agent 'Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0' \
+              --header 'Accept-Language: en-US,en;q=0.5' \
+              --range 0- \
+              'https://nds.iaea.org/talys/codes/talys.tar' \
+              --output "$out"
+          '';
 
           talys-structure = pkgs.stdenv.mkDerivation {
             pname = "talys-structure";
